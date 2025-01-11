@@ -1,0 +1,10 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+/.vs
+/env
+/readme.html
+/voting-app.pyproj
+/voting-app.pyproj.user
+/voting-app.sln
