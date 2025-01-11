@@ -122,6 +122,7 @@ REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
 
+#For generating API documentation
 SPECTACULAR_SETTINGS = {
     'TITLE': 'Voting backend API',
     'DESCRIPTION': 'API documentation for backend application',
