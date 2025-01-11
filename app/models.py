@@ -1,3 +1,5 @@
+"""This code was written by Uchenna David using Microsoft Visual Studio 2022."""
+
 """
 Definition of models.
 """
@@ -7,13 +9,15 @@ from django.contrib.auth.models import User
 from django.utils.timezone import now
 
 
+# The tag model is used to categorize questions under a psecific tag permitting users to create more than one question.
 class Tag(models.Model):
     name = models.CharField(max_length=200)
-    code =  models.IntegerField(max_length=6)
+    code =  models.IntegerField()
     def __str__(self):
         return self.name
 
 
+# The anonymous model is used to store the name of users who vote anonymously.
 class Anonymous(models.Model):
     name = models.CharField(max_length=200)
 
@@ -21,6 +25,7 @@ class Anonymous(models.Model):
         return self.name
 
 
+# The question model is used to create a question with a unique tag and end time, the code is generated to identify the question.
 class Question(models.Model):
     title = models.CharField(max_length=200)
     end_time = models.DateTimeField()
@@ -35,7 +40,8 @@ class Question(models.Model):
     def __str__(self):
         return self.title
 
-    
+
+# The choice model is used to create options for a question, the votes are stored in the database and the text is used to store custom text for the 'Others' option.
 class Choice(models.Model):
 
     OPTION_CHOICES = [

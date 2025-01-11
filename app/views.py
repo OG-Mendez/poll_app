@@ -5,21 +5,59 @@ Definition of views.
 from datetime import datetime
 from django.utils.timezone import now
 import random
-from random import choices
 from django.shortcuts import render, get_object_or_404, redirect
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from .serializers import QuestionSerializer
-from .models import Question, Choice, Anonymous
-from django.shortcuts import render
+from .models import Question, Choice
 from django.contrib.auth.models import User
 from django.http import HttpRequest
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample, OpenApiResponse
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.contrib.auth import authenticate, login
 from rest_framework.authtoken.models import Token
 
 
+# The create_poll view is used to create a poll with a unique tag, end time, and choices.
+@extend_schema(
+    summary="Create a poll",
+    description="Create a new poll with a unique tag, end time, and a list of choices.",
+    request={
+        "application/json": {
+            "example": {
+                "tag": "poll123",
+                "question": "What's your favorite color?",
+                "end_time": "2025-01-15T12:00:00Z",
+                "choices": [
+                    {"text": "Red"},
+                    {"text": "Blue"},
+                    {"text": "Green"}
+                ]
+            }
+        }
+    },
+    responses={
+        201: OpenApiResponse(
+            description="Poll created successfully",
+            examples=[
+                OpenApiExample(
+                    "Poll created successfully",
+                    value={"message": "Poll created successfully, write down the TAG: poll123"}
+                )
+            ]
+        ),
+        400: OpenApiResponse(
+            description="Error message",
+            examples=[
+                OpenApiExample(
+                    "Error message",
+                    value={"error": "All fields are required"}
+                )
+            ]
+        )
+    }
+)
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def create_poll(request):
@@ -31,21 +69,57 @@ def create_poll(request):
     if not tag or not question or not end_time or not choices:
         return Response({"error": "All fields are required"}, status=status.HTTP_400_BAD_REQUEST)
 
-    code = random.randint(100000, 999999)
-
     question_instance = Question.objects.create(
         title=question, 
         end_time=end_time, 
         unique_tag=tag,
-        code=code,
         created_by=request.user)
 
     for choice_option in choices:
-        Choice.objects.create(question=question_instance, option=choice_option['option'], text=choice_option.get('text'))
+        Choice.objects.create(question=question_instance, text=choice_option['text'])
         
-    return Response({"message": f"Poll created successfully, write down the TAG: {question_instance.unique_tag} and the code: {question_instance.code}"}, status=status.HTTP_201_CREATED)
+    return Response({"message": f"Poll created successfully, write down the TAG: {question_instance.unique_tag}"}, status=status.HTTP_201_CREATED)
 
 
+# The get_questions view is used to get the question and choices for a poll using the tag and code.
+@extend_schema(
+    summary="Get questions and choices for a poll",
+    description="Retrieve questions and their choices based on the provided tag and code.",
+    parameters=[
+        OpenApiParameter(name="tag", description="Unique tag of the poll", required=True, type=str),
+        OpenApiParameter(name="code", description="Code of the poll", required=True, type=str),
+    ],
+    responses={
+        200: OpenApiResponse(
+            description="List of questions and choices",
+            examples=[
+                OpenApiExample(
+                    "List of questions and choices",
+                    value=[
+                        {
+                            "id": 1,
+                            "question": "What's your favorite color?",
+                            "choices": [
+                                {"text": "Red"},
+                                {"text": "Blue"},
+                                {"text": "Green"}
+                            ]
+                        }
+                    ]
+                )
+            ]
+        ),
+        400: OpenApiResponse(
+            description="Error message",
+            examples=[
+                OpenApiExample(
+                    "Error message",
+                    value={"error": "Both tag and code are required."}
+                )
+            ]
+        )
+    }
+)
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def get_questions(request):
@@ -55,73 +129,164 @@ def get_questions(request):
     if not tag or not code:
         return Response({"error": "Both tag and code are required."}, status=status.HTTP_400_BAD_REQUEST)
 
-    try:
-        question = Question.objects.get(unique_tag=tag, code=code)
-    except Question.DoesNotExist:
+    questions = Question.objects.filter(unique_tag=tag, code=code)
+
+    if not questions.exists():
         return Response({"error": "Invalid tag or code"}, status=status.HTTP_400_BAD_REQUEST)
 
     return Response(
-        {
-            "question": question.title,
-            "choices": [choice.option for choice in question.choice_set.all()],
-        },
+        [
+            {
+                "id": question.id,
+                "question": question.title,
+                "choices": [{"text": c.text} for c in question.choices.all()],
+            }
+            for question in questions
+        ],
         status=status.HTTP_200_OK,
     )
 
 
-@api_view(['GET', 'POST'])
+# The vote view is used to submit a vote for a poll using the tag, code, and choice.
+@extend_schema(
+    summary="Submit a vote for a poll",
+    description="Cast a vote for a specific choice in a poll using the tag and code.",
+    parameters=[
+        OpenApiParameter(name="tag", description="Unique tag of the poll", required=True, type=str),
+        OpenApiParameter(name="code", description="Code of the poll", required=True, type=str),
+    ],
+    request={
+        "application/json": {
+            "example": {
+                "question_id": 1,
+                "choice": "Blue"
+            }
+        }
+    },
+    responses={
+        200: OpenApiResponse(
+            description="Vote submitted successfully",
+            examples=[
+                OpenApiExample(
+                    "Vote submitted successfully",
+                    value={"message": "Vote submitted successfully."}
+                )
+            ]
+        ),
+        400: OpenApiResponse(
+            description="Error message",
+            examples=[
+                OpenApiExample(
+                    "Error message",
+                    value={"error": "Tag and code are required."}
+                )
+            ]
+        ),
+        404: OpenApiResponse(
+            description="Error message",
+            examples=[
+                OpenApiExample(
+                    "Error message",
+                    value={"error": "Invalid choice or question."}
+                )
+            ]
+        )
+    }
+)
+@api_view(['POST'])
 @permission_classes([AllowAny])
 def vote(request):
     tag = request.query_params.get('tag')
     code = request.query_params.get('code')
+
     if not tag or not code:
         return Response({"error": "Tag and code are required."}, status=status.HTTP_400_BAD_REQUEST)
 
-    try:
-        question = Question.objects.get(unique_tag=tag, code=code)
-        if question.end_time < now():
-            return Response({"error": "Poll has ended."}, status=status.HTTP_400_BAD_REQUEST)
-    except Question.DoesNotExist:
+    questions = Question.objects.filter(unique_tag=tag, code=code)
+    if not questions.exists():
         return Response({"error": "Invalid tag or code."}, status=status.HTTP_404_NOT_FOUND)
 
     if request.method == 'POST':
+        question_id = request.data.get('question_id')  
         choice = request.data.get('choice')
         try:
-            selected_choice = question.choice_set.get(option=choice)
-        except Choice.DoesNotExist:
-            return Response({"error": "Invalid choice."}, status=status.HTTP_404_NOT_FOUND)
-        
+            question = questions.get(id=question_id)
+            selected_choice = question.choices.get(text=choice)
+        except (Question.DoesNotExist, Choice.DoesNotExist):
+            return Response({"error": "Invalid choice or question."}, status=status.HTTP_404_NOT_FOUND)
+
         selected_choice.votes += 1  
         selected_choice.save()
         return Response({"message": "Vote submitted successfully."}, status=status.HTTP_200_OK)
-    elif request.method == 'GET':
-        return Response({
-            "question": question.title,
-            "choices": [{"option": c.option, "text": c.text} for c in question.choice_set.all()],
-        })
 
 
+# The results view is used to get the results of a poll using the tag and code.
+@extend_schema(
+    summary="Get results of a poll",
+    description="Retrieve poll results, including votes per choice, using tag and code.",
+    parameters=[
+        OpenApiParameter(name="tag", description="Unique tag of the poll", required=True, type=str),
+        OpenApiParameter(name="code", description="Code of the poll", required=True, type=str),
+    ],
+    responses={
+        200: OpenApiResponse(
+            description="List of questions with choices and votes",
+            examples=[
+                OpenApiExample(
+                    "List of questions with choices and votes",
+                    value=[
+                        {
+                            "id": 1,
+                            "question": "What's your favorite color?",
+                            "choices": [
+                                {"A": "Red", "votes": 10},
+                                {"B": "Blue", "votes": 20},
+                                {"C": "Green", "votes": 5}
+                            ]
+                        }
+                    ]
+                )
+            ]
+        ),
+        404: OpenApiResponse(
+            description="No polls found or polls haven't ended",
+            examples=[
+                OpenApiExample(
+                    "Error message",
+                    value={"error": "No polls found or polls haven't ended."}
+                )
+            ]
+        )
+    }
+)
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def results(request):
     tag = request.query_params.get('tag')
     code = request.query_params.get('code')
-    
+
     if not tag or not code:
         return Response({"error": "All fields are required."}, status=status.HTTP_400_BAD_REQUEST)
 
-    try:
-        question = Question.objects.get(unique_tag=tag, code=code)
-        if question.end_time > now():
-            serializer = QuestionSerializer(question)
-            return Response(serializer.data)
-    except Question.DoesNotExist:
-        return Response({"error": "Poll not found."}, status=status.HTTP_404_NOT_FOUND)
+    questions = Question.objects.filter(unique_tag=tag, code=code, end_time__lte=now())
 
-    return Response({"error": "Unexpected error occurred."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    if not questions.exists():
+        return Response({"error": "No polls found or polls haven't ended."}, status=status.HTTP_404_NOT_FOUND)
+
+    return Response(
+        [
+            {
+                "id": question.id,
+                "question": question.title,
+                "choices": [{"text": c.text, "votes": c.votes} for c in question.choices.all()],
+            }
+            for question in questions
+        ],
+        status=status.HTTP_200_OK,
+    )
 
 
-
+# Everything below is default Microsoft Visual Studio 2022 code snippet for Django and was not tampered with
 def home(request):
     """Renders the home page."""
     assert isinstance(request, HttpRequest)
@@ -159,3 +324,4 @@ def about(request):
             'year':datetime.now().year,
         }
     )
+

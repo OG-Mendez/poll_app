@@ -1,6 +1,7 @@
 from django.urls import path
 from . import views
 
+# Define the URL patterns for the app
 urlpatterns = [ 
     path('api/create_poll/', views.create_poll, name='create_poll'),
     path('api/get_questions/', views.get_questions, name='get_questions'),
