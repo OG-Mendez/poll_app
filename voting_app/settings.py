@@ -31,7 +31,9 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['poll-app-b0bs.onrender.com']
+ALLOWED_HOSTS = ['poll-app-b0bs.onrender.com', 'localhost', '127.0.0.1']
+
+CORS_ALLOWED_ORIGIN = ['http://localhost', 'http://127.0.0.1']
 
 # Application references
 # https://docs.djangoproject.com/en/2.1/ref/settings/#std:setting-INSTALLED_APPS

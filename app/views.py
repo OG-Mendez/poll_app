@@ -19,6 +19,42 @@ from django.contrib.auth import authenticate, login
 from rest_framework.authtoken.models import Token
 
 
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def signup_view_api(request):
+    username = request.data.get('username')
+    password = request.data.get('password')
+    email = request.data.get('email')
+
+    if User.objects.filter(username=username).exists():
+        return Response({'error': 'Username already taken'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if User.objects.filter(email=email).exists():
+        return Response({'error': 'Email already taken'}, status=status.HTTP_400_BAD_REQUEST)
+
+    user = User.objects.create_user(username=username, password=password, email=email)
+    user.save()
+    token, _ = Token.objects.get_or_create(user=user)
+    return Response({'message': 'User created successfully', 'token': token.key}, status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def login_view_api(request):
+    username = request.data.get('username')
+    password = request.data.get('password')
+    user = authenticate(username=username, password=password)
+
+    if user is not None:
+        token, _ = Token.objects.get_or_create(user=user)
+        return Response({'token': token.key}, status=status.HTTP_200_OK)
+    else:
+        return Response(
+            {'error': 'Invalid credentials, please check to make sure the email and/or password is correct'},
+            status=status.HTTP_400_BAD_REQUEST)
+
+     
 # The create_poll view is used to create a poll with a unique tag, end time, and choices.
 @extend_schema(
     summary="Create a poll",
