@@ -3,6 +3,7 @@ Definition of views.
 """
 
 from datetime import datetime
+from optparse import Option
 from django.utils.timezone import now
 import random
 from django.shortcuts import render, get_object_or_404, redirect
@@ -17,6 +18,53 @@ from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExampl
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.contrib.auth import authenticate, login
 from rest_framework.authtoken.models import Token
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def signup_view_api(request):
+    username = request.data.get('username')
+    password = request.data.get('password')
+    email = request.data.get('email')
+
+    if User.objects.filter(username=username).exists():
+        return Response({'error': 'Username already taken'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if User.objects.filter(email=email).exists():
+        return Response({'error': 'Email already taken'}, status=status.HTTP_400_BAD_REQUEST)
+
+    user = User.objects.create_user(username=username, password=password, email=email)
+    user.save()
+    token, _ = Token.objects.get_or_create(user=user)
+    return Response({'message': 'User created successfully', 'token': token.key}, status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def login_view_api(request):
+    username = request.data.get('username')
+    password = request.data.get('password')
+    user = authenticate(username=username, password=password)
+
+    if user is not None:
+        token, _ = Token.objects.get_or_create(user=user)
+        return Response({'token': token.key}, status=status.HTTP_200_OK)
+    else:
+        return Response(
+            {'error': 'Invalid credentials, please check to make sure the email and/or password is correct'},
+            status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def logout_view_api(request):
+    try:
+        token = Token.objects.get(user=request.user)
+        token.delete()
+        return Response({"message": "Logged out successfully"}, status=status.HTTP_200_OK)
+    except Token.DoesNotExist:
+        return Response({"error": "Token not found"}, status=status.HTTP_400_BAD_REQUEST)
+
 
 
 # The create_poll view is used to create a poll with a unique tag, end time, and choices.
@@ -69,16 +117,20 @@ def create_poll(request):
     if not tag or not question or not end_time or not choices:
         return Response({"error": "All fields are required"}, status=status.HTTP_400_BAD_REQUEST)
 
+    code = random.randint(100000, 999999)
+
     question_instance = Question.objects.create(
         title=question, 
         end_time=end_time, 
         unique_tag=tag,
+        code=code,
         created_by=request.user)
 
     for choice_option in choices:
-        Choice.objects.create(question=question_instance, text=choice_option['text'])
-        
-    return Response({"message": f"Poll created successfully, write down the TAG: {question_instance.unique_tag}"}, status=status.HTTP_201_CREATED)
+        for option, text in choice_option.items():
+            Choice.objects.create(question=question_instance, text=text, option=option)
+       
+    return Response({"message": f"Poll created successfully, write down the TAG: {question_instance.unique_tag} and the code: {question_instance.code}"}, status=status.HTTP_201_CREATED)
 
 
 # The get_questions view is used to get the question and choices for a poll using the tag and code.
@@ -139,7 +191,7 @@ def get_questions(request):
             {
                 "id": question.id,
                 "question": question.title,
-                "choices": [{"text": c.text} for c in question.choices.all()],
+                "choices": [{"option": choice.option, "text": choice.text} for choice in question.choice_set.all()],
             }
             for question in questions
         ],
@@ -211,7 +263,7 @@ def vote(request):
         choice = request.data.get('choice')
         try:
             question = questions.get(id=question_id)
-            selected_choice = question.choices.get(text=choice)
+            selected_choice = question.choice_set.get(option=choice)
         except (Question.DoesNotExist, Choice.DoesNotExist):
             return Response({"error": "Invalid choice or question."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -278,7 +330,7 @@ def results(request):
             {
                 "id": question.id,
                 "question": question.title,
-                "choices": [{"text": c.text, "votes": c.votes} for c in question.choices.all()],
+                "choices": [{"option": choice.option, "text": choice.text, "votes": choice.votes} for choice in question.choice_set.all()],
             }
             for question in questions
         ],
