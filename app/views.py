@@ -20,6 +20,7 @@ from django.contrib.auth import authenticate, login
 from rest_framework.authtoken.models import Token
 
 
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def signup_view_api(request):
@@ -54,7 +55,7 @@ def login_view_api(request):
             {'error': 'Invalid credentials, please check to make sure the email and/or password is correct'},
             status=status.HTTP_400_BAD_REQUEST)
 
-
+     
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def logout_view_api(request):
@@ -129,7 +130,7 @@ def create_poll(request):
     for choice_option in choices:
         for option, text in choice_option.items():
             Choice.objects.create(question=question_instance, text=text, option=option)
-       
+        
     return Response({"message": f"Poll created successfully, write down the TAG: {question_instance.unique_tag} and the code: {question_instance.code}"}, status=status.HTTP_201_CREATED)
 
 
