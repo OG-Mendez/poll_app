@@ -108,7 +108,7 @@ def logout_view_api(request):
     }
 )
 @api_view(['POST'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def create_poll(request):
     tag = request.data.get('tag')
     question = request.data.get('question')
@@ -247,7 +247,7 @@ def get_questions(request):
     }
 )
 @api_view(['POST'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def vote(request):
     tag = request.query_params.get('tag')
     code = request.query_params.get('code')
