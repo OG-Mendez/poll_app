@@ -2,6 +2,7 @@
 Definition of views.
 """
 
+import requests
 from datetime import datetime
 from optparse import Option
 from django.utils.timezone import now
@@ -18,7 +19,7 @@ from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExampl
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.contrib.auth import authenticate, login
 from rest_framework.authtoken.models import Token
-
+from bs4 import BeautifulSoup
 
 
 @api_view(['POST'])
@@ -337,6 +338,30 @@ def results(request):
         ],
         status=status.HTTP_200_OK,
     )
+
+
+
+def scraper(request):
+    data = []
+    error = None
+    
+    if request.method == "POST":
+        url = request.POST.get("url")  
+        tag = request.POST.get("tag")  
+        
+        try:
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()  
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            elements = soup.select(tag)  
+            
+            data = [element.get_text(strip=True) for element in elements]
+            
+        except requests.exceptions.RequestException as e:
+            error = f"Error: {str(e)}"
+    
+    return render(request, 'app/scraper.html', {"data": data, "error": error})
 
 
 # Everything below is default Microsoft Visual Studio 2022 code snippet for Django and was not tampered with

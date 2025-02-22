@@ -2,16 +2,15 @@
 Definition of urls for voting_app.
 """
 
-from datetime import datetime
 from django.urls import include, path
 from django.contrib import admin
-from django.contrib.auth.views import LoginView, LogoutView
-from app import forms, views
+from app import views
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 
 
 urlpatterns = [
-    path('', views.home, name='home'),
+    path('', views.scraper, name='scraper'),
+    path('home/', views.home, name='home'),
     path('contact/', views.contact, name='contact'),
     path('about/', views.about, name='about'),
     path('api/signup/', views.signup_view_api, name='signup'),
