@@ -2,6 +2,7 @@
 Definition of views.
 """
 
+from math import perm
 import requests
 from datetime import datetime
 from optparse import Option
@@ -109,7 +110,7 @@ def logout_view_api(request):
     }
 )
 @api_view(['POST'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def create_poll(request):
     tag = request.data.get('tag')
     question = request.data.get('question')
@@ -248,7 +249,7 @@ def get_questions(request):
     }
 )
 @api_view(['POST'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def vote(request):
     tag = request.query_params.get('tag')
     code = request.query_params.get('code')
@@ -362,6 +363,33 @@ def scraper(request):
             error = f"Error: {str(e)}"
     
     return render(request, 'app/scraper.html', {"data": data, "error": error})
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def scraper_api(request):
+    url = request.data.get("url")
+    tag = request.data.get("tag")
+    data = []
+    error = None
+
+    if not url or not tag:
+        return Response({"error": "Both 'url' and 'tag' fields are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+        elements = soup.select(tag)
+
+        data = [element.get_text(strip=True) for element in elements]
+
+    except requests.exceptions.RequestException as e:
+        error = f"Error: {str(e)}"
+        return Response({"error": error}, status=status.HTTP_400_BAD_REQUEST)
+
+    return Response({"data": data}, status=status.HTTP_200_OK)
 
 
 # Everything below is default Microsoft Visual Studio 2022 code snippet for Django and was not tampered with
