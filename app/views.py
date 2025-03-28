@@ -3,6 +3,7 @@ Definition of views.
 """
 
 from math import perm
+from django.views.decorators.csrf import csrf_exempt
 import requests
 from datetime import datetime
 from optparse import Option
@@ -12,15 +13,19 @@ from django.shortcuts import render, get_object_or_404, redirect
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.views import csrf_exempt
 from .serializers import QuestionSerializer
 from .models import Question, Choice
 from django.contrib.auth.models import User
+import csv
+from io import StringIO
 from django.http import HttpRequest
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample, OpenApiResponse
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.contrib.auth import authenticate, login
 from rest_framework.authtoken.models import Token
 from bs4 import BeautifulSoup
+from django.http import HttpResponse
 
 
 @api_view(['POST'])
@@ -341,55 +346,136 @@ def results(request):
     )
 
 
-
 def scraper(request):
     data = []
     error = None
-    
+
     if request.method == "POST":
-        url = request.POST.get("url")  
-        tag = request.POST.get("tag")  
-        
-        try:
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()  
-            
-            soup = BeautifulSoup(response.text, 'html.parser')
-            elements = soup.select(tag)  
-            
-            data = [element.get_text(strip=True) for element in elements]
-            
-        except requests.exceptions.RequestException as e:
-            error = f"Error: {str(e)}"
-    
+        url = request.POST.get("url")
+        tags_str = request.POST.get("tags")
+
+        if not url or not tags_str:
+            error = "Please provide a URL and at least one tag."
+        else:
+            tags = [tag.strip() for tag in tags_str.split(',')]
+
+            try:
+                response = requests.get(url, timeout=10)
+                response.raise_for_status()
+
+                soup = BeautifulSoup(response.text, 'html.parser')
+                all_elements_data = {}
+
+                for tag in tags:
+                    elements = soup.select(tag)
+                    all_elements_data[tag] = [element.get_text(strip=True) for element in elements]
+
+                max_len = max(len(items) for items in all_elements_data.values()) if all_elements_data else 0
+
+                csv_data = [["Tag"] + [f"Item {i+1}" for i in range(max_len)]]
+                for tag, items in all_elements_data.items():
+                    row = [tag] + items + [""] * (max_len - len(items))
+                    csv_data.append(row)
+
+                data = csv_data
+
+                if 'download' in request.POST:
+                    output = StringIO()
+                    writer = csv.writer(output)
+                    for row in csv_data:
+                        writer.writerow(row)
+
+                    csv_content = output.getvalue()
+                    response = HttpResponse(csv_content, content_type='text/csv')
+                    response['Content-Disposition'] = 'attachment; filename="scraped_data.csv"'
+                    return response
+
+            except requests.exceptions.RequestException as e:
+                error = f"Error: {str(e)}"
+
     return render(request, 'app/scraper.html', {"data": data, "error": error})
 
 
+# This function scrpaes data from a given URL and specified tags
+@extend_schema(
+    summary="Scrape data from a given URL and specified tags",
+    description="Scrapes the content from the provided URL based on the specified tags and returns a downloadable CSV file.",
+    parameters=[
+        OpenApiParameter(name="url", description="The URL to scrape data from", required=True, type=str),
+        OpenApiParameter(name="tags", description="Comma-separated list of tags to scrape", required=True, type=str),
+    ],
+    responses={
+        200: OpenApiResponse(
+            description="CSV file containing the scraped data",
+            examples=[
+                OpenApiExample(
+                    "Sample CSV response",
+                    value="Tag,Item 1,Item 2\nchange,Deep thoughts,Thinking\n",
+                    media_type="text/csv",
+                )
+            ]
+        ),
+        400: OpenApiResponse(
+            description="Error response due to invalid input or request",
+            examples=[
+                OpenApiExample(
+                    "Error message",
+                    value={"error": "Both 'url' and 'tags' fields are required."}
+                )
+            ]
+        ),
+    }
+)
+@csrf_exempt
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def scraper_api(request):
     url = request.data.get("url")
-    tag = request.data.get("tag")
+    tags_str = request.data.get("tags")
     data = []
     error = None
 
-    if not url or not tag:
-        return Response({"error": "Both 'url' and 'tag' fields are required."}, status=status.HTTP_400_BAD_REQUEST)
+    if not url or not tags_str:
+        return Response({"error": "Both 'url' and 'tags' fields are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    tags = [tag.strip() for tag in tags_str.split(',')]
 
     try:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
 
         soup = BeautifulSoup(response.text, 'html.parser')
-        elements = soup.select(tag)
+        all_elements_data = {}
 
-        data = [element.get_text(strip=True) for element in elements]
+        for tag in tags:
+            elements = soup.select(tag)
+            all_elements_data[tag] = [element.get_text(strip=True) for element in elements]
+
+        
+        max_len = max(len(items) for items in all_elements_data.values()) if all_elements_data else 0
+
+        
+        output = StringIO()
+        writer = csv.writer(output)
+
+       
+        header = ["Tag"] + [f"Item {i+1}" for i in range(max_len)]
+        writer.writerow(header)
+
+        
+        for tag, items in all_elements_data.items():
+            row = [tag] + items + [""] * (max_len - len(items))
+            writer.writerow(row)
+
+        csv_content = output.getvalue()
+
+        response = Response(csv_content, content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="scraped_data.csv"'
+        return response
 
     except requests.exceptions.RequestException as e:
         error = f"Error: {str(e)}"
         return Response({"error": error}, status=status.HTTP_400_BAD_REQUEST)
-
-    return Response({"data": data}, status=status.HTTP_200_OK)
 
 
 # Everything below is default Microsoft Visual Studio 2022 code snippet for Django and was not tampered with

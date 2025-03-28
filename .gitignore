@@ -8,3 +8,6 @@
 /voting-app.pyproj
 /voting-app.pyproj.user
 /voting-app.sln
+/app/__pycache__/urls.cpython-312.pyc
+/voting_app/__pycache__/settings.cpython-312.pyc
+*.pyc

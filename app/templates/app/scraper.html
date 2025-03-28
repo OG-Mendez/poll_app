@@ -1,28 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Web Scraper</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            padding: 20px;
+            margin: 0;
+        }
 
-{% block content %}
-<h1>Web Scraper</h1>
+        h2 {
+            color: #333;
+        }
 
-<form method="POST">
-    {% csrf_token %}
-    <label for="url">Enter URL:</label>
-    <input type="url" name="url" required>
+        form, table {
+            background-color: #fff;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
 
-    <label for="tag">Enter HTML Tag (e.g., h2, p, div.classname):</label>
-    <input type="text" name="tag" required>
+        label {
+            font-weight: bold;
+            margin: 5px 0;
+            display: block;
+        }
 
-    <button type="submit">Scrape</button>
-</form>
+        input[type="url"], input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0 10px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+        }
+
+        button {
+            padding: 8px 16px;
+            margin: 5px 0;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+            button:hover {
+                background-color: #0056b3;
+            }
+
+        .alert {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        .alert-error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 8px;
+            border: 1px solid #ddd;
+            text-align: left;
+        }
+
+        th {
+            background-color: #007bff;
+            color: white;
+        }
+
+        td {
+            background-color: #f9f9f9;
+        }
+
+        .download-btn {
+            margin-top: 10px;
+            background-color: #28a745;
+        }
+
+            .download-btn:hover {
+                background-color: #218838;
+            }
+    </style>
+</head>
+<body>
+
+    <h2>Web Scraper by Uchenna David Chinenye</h2>
+
+    <form method="post">
+        {% csrf_token %}
+        <label for="url">URL:</label>
+        <input type="url" id="url" name="url" placeholder="Enter the URL to scrape" required>
+
+        <label for="tags">Tags (comma-separated):</label>
+        <input type="text" id="tags" name="tags" placeholder="e.g., span.author, span.quote" required>
+
+        <button type="submit">Scrape</button>
+    </form>
 
     {% if error %}
-<p style="color: red;">{{ error }}</p>
+    <div class="alert alert-error">{{ error }}</div>
     {% endif %}
 
     {% if data %}
-<h2>Scraped Results:</h2>
-<ul>
-    {% for item in data %}
-    <li>{{ item }}</li>
-    {% endfor %}
-</ul>
+    <h2>Scraped Data:</h2>
+    <table>
+        {% for row in data %}
+        <tr>
+            {% for cell in row %}
+            <td>{{ cell }}</td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+    </table>
+
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="url" value="{{ request.POST.url }}">
+        <input type="hidden" name="tags" value="{{ request.POST.tags }}">
+        <button type="submit" name="download" class="download-btn">Download CSV</button>
+    </form>
     {% endif %}
-{% endblock %}
+
+</body>
+</html>
