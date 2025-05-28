@@ -135,8 +135,11 @@ REST_FRAMEWORK = {
 
 #For generating API documentation
 SPECTACULAR_SETTINGS = {
-    'TITLE': 'Voting backend API',
-    'DESCRIPTION': 'API documentation for backend application',
-    'VERSION': '1.0.0',
+    'TITLE': '12CC API Documentation',
+    'DESCRIPTION': 'API documentation for 12CC',
+    'VERSION': '3.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
 }
+
+API_KEYS = os.getenv("API_KEYS", "").split(",")
+

@@ -64,3 +64,86 @@ class Choice(models.Model):
     class Meta:
         verbose_name_plural = "Choices"
         ordering = ['option']
+
+
+class ForumQuestion(models.Model):
+    asked_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='questioned_by', default=1)
+    question = models.TextField(null=False, blank=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    upvote_question = models.ManyToManyField(User, related_name='upvoted_question', blank=True)
+    downvote_question = models.ManyToManyField(User, related_name='downvoted_question', blank=True)
+    notification = models.ManyToManyField(User, related_name='notification')
+
+    def total_upvote_question(self):
+        return self.upvote_question.count()
+
+    def total_downvote_question(self):
+        return self.downvote_question.count()
+
+    def total_answers(self):
+        return self.answers.count()
+
+
+class Answer(models.Model):
+    answered_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='answered_by', default=1)
+    question_replied = models.ForeignKey(ForumQuestion, on_delete=models.CASCADE, related_name='answers')
+    content = models.TextField(null=False, blank=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    upvote_answer = models.ManyToManyField(User, related_name='upvoted_answer', blank=True)
+    downvote_answer = models.ManyToManyField(User, related_name='downvoted_answer', blank=True)
+    parent_answer = models.ForeignKey('self', null=True, blank=True, on_delete=models.CASCADE,
+                                      related_name='child_answers')
+
+    def get_conversation_thread(self):
+        thread = [self]
+        for child in self.child_answers.all().order_by('created_at'):
+            thread.extend(child.get_conversation_thread())
+        return thread
+
+    def total_upvote_answer(self):
+        return self.upvote_answer.count()
+
+    def total_downvote_answer(self):
+        return self.downvote_answer.count()
+
+    def total_replies(self):
+        return self.replies.count()
+
+
+class Reply(models.Model):
+    replied_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='replied_by')
+    answer = models.ForeignKey(Answer, on_delete=models.CASCADE, related_name='replies')
+    content = models.TextField(null=False, blank=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    likes = models.ManyToManyField(User, related_name='liked_replies', blank=True)
+    dislikes = models.ManyToManyField(User, related_name='disliked_replies', blank=True)
+
+    def __str__(self):
+        return f"Reply by {self.replied_by.username} for Answer {self.answer.id}"
+
+    def total_likes(self):
+        return self.likes.count()
+
+    def total_dislikes(self):
+        return self.dislikes.count()
+
+
+class Notification(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="user_notification")
+    question = models.ForeignKey(Question, on_delete=models.CASCADE, related_name="question_notification")
+    notify = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user.username} will be notified if new answers to {self.question.question}"
+
+
+class Apikey(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='apikey_user')
+    key = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+    def __str__(self):
+        return f"API Key for {self.user.username}"
+    
+    class Meta:
+        verbose_name_plural = "API Keys"

@@ -9,8 +9,8 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, Sp
 
 
 urlpatterns = [
-    path('', views.scraper, name='scraper'),
-    path('home/', views.home, name='home'),
+    path('', views.home, name='home'),
+    path('scraper/', views.scraper, name='scraper'),
     path('contact/', views.contact, name='contact'),
     path('about/', views.about, name='about'),
     path('api/signup/', views.signup_view_api, name='signup'),

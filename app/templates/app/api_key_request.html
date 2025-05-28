@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Request API Key</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            padding: 20px;
+            margin: 0;
+        }
+
+        h2 {
+            color: #333;
+        }
+
+        form, .api-key-box {
+            background-color: #fff;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        label {
+            font-weight: bold;
+            margin: 5px 0;
+            display: block;
+        }
+
+        button {
+            padding: 8px 16px;
+            margin: 5px 0;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        .alert {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        .alert-error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+
+        .alert-success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+
+        .api-key-box {
+            text-align: center;
+            font-size: 1.2em;
+            background-color: #e9ecef;
+        }
+
+        .copy-btn {
+            margin-top: 10px;
+            background-color: #28a745;
+        }
+
+        .copy-btn:hover {
+            background-color: #218838;
+        }
+    </style>
+    <script>
+        function copyApiKey() {
+            var apiKey = document.getElementById("api-key-value").innerText;
+            navigator.clipboard.writeText(apiKey).then(function() {
+                var btn = document.getElementById("copy-btn");
+                btn.innerText = "Copied!";
+                setTimeout(function() { btn.innerText = "Copy to Clipboard"; }, 1500);
+            });
+        }
+    </script>
+</head>
+<body>
+
+    <h2>Request X-API-KEY</h2>
+    <a href="{% url 'home' %}">Back to Home</a>
+
+    {% if error %}
+        <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+    {% if message %}
+        <div class="alert alert-success">{{ message }}</div>
+    {% endif %}
+
+    {% if api_key %}
+        <div class="api-key-box">
+            <strong>Your API Key:</strong>
+            <div id="api-key-value" style="margin-top:10px; font-size:1.3em; color:#007bff;">{{ api_key }}</div>
+            <button type="button" class="copy-btn" id="copy-btn" onclick="copyApiKey()">Copy to Clipboard</button>
+        </div>
+    {% else %}
+        <form method="post">
+            {% csrf_token %}
+            <button type="submit">Request API Key</button>
+        </form>
+    {% endif %}
+
+</body>
+</html>

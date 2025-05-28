@@ -3,21 +3,29 @@ Definition of views.
 """
 
 from math import perm
+from random import sample, seed
+
 from django.views.decorators.csrf import csrf_exempt
 import requests
+import os
 from datetime import datetime
 from optparse import Option
 from django.utils.timezone import now
 import random
 from django.shortcuts import render, get_object_or_404, redirect
+from django.contrib import messages
+from django.conf import settings
+from rest_framework.exceptions import APIException
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.views import csrf_exempt
-from .serializers import QuestionSerializer
-from .models import Question, Choice
+from .serializers import QuestionSerializer, AnswerSerializer, ForumQuestionSerializer, NotificationSerializer, ReplySerializer
+from .models import ForumQuestion, Question, Choice, Answer, Reply, Notification, Apikey
 from django.contrib.auth.models import User
 import csv
+import numpy as np
+from sentence_transformers import SentenceTransformer
 from io import StringIO
 from django.http import HttpRequest
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample, OpenApiResponse
@@ -26,6 +34,39 @@ from django.contrib.auth import authenticate, login
 from rest_framework.authtoken.models import Token
 from bs4 import BeautifulSoup
 from django.http import HttpResponse
+from django.db.models import Count
+
+
+def signup_view(request):
+    if request.method == 'POST':
+        username = request.POST['username']
+        email = request.POST['email']
+        password = request.POST['password']
+
+        if User.objects.filter(username=username).exists():
+            messages.error(request, 'Username already taken.')
+        else:
+            User.objects.create_user(username=username, email=email, password=password)
+            messages.success(request, 'Account created successfully!')
+            return redirect('login')
+
+    return render(request, 'app/signup.html')
+
+
+def login_view(request):
+    if request.method == 'POST':
+        username = request.POST['username']
+        password = request.POST['password']
+        user = authenticate(request, username=username, password=password)
+
+        if user is not None:
+            login(request, user)
+            messages.success(request, 'Login successful!')
+            return redirect('request_api_key')
+        else:
+            messages.error(request, 'Invalid credentials.')
+
+    return render(request, 'app/login.html')
 
 
 @api_view(['POST'])
@@ -347,6 +388,16 @@ def results(request):
 
 
 def scraper(request):
+    """
+    Renders a form for scraping HTML tags from a given URL.
+    On POST, scrapes the specified tags and displays or downloads the results as CSV.
+
+    Args:
+        request: Django HttpRequest object.
+
+    Returns:
+        Rendered HTML page or downloadable CSV file.
+    """
     data = []
     error = None
 
@@ -478,13 +529,664 @@ def scraper_api(request):
         return Response({"error": error}, status=status.HTTP_400_BAD_REQUEST)
 
 
+@permission_classes([IsAuthenticated])
+def get_apikey(request):
+    """
+    Generates or retrieves an API key for the authenticated user.
+    If the user already has an API key, it returns the existing one.
+    If not, it creates a new API key and returns it.
+    """
+
+    user = request.user
+    existing = Apikey.objects.filter(user=user).first()
+    if existing:
+        return render(request, 'app/api_key_request.html', context)
+    
+    context = {}
+    api_keys = [k for k in getattr(settings, 'API_KEYS', []) if k]
+    if not api_keys:
+        context['error'] = "No API keys are configured. Please contact support."
+        return render(request, 'app/api_key_request.html', context)
+
+    if request.method == "POST":
+        api_key = random.choice(api_keys)
+        context['api_key'] = api_key
+        context['message'] = "Here is your API key."
+        return render(request, 'app/api_key_request.html', context)
+
+    return render(request, 'app/api_key_request.html', context)
+
+
+model = SentenceTransformer("all-MiniLM-L6-v2")
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_question(request):
+    content = request.data.get('content')
+    similarity_threshold = 0.7
+
+    if not content:
+        return Response({'error': 'Content is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        global model
+        new_question_embedding = model.encode(content, convert_to_numpy=True)
+
+        existing_questions = ForumQuestion.objects.all()
+
+        suggested_questions = []
+        for existing_question in existing_questions:
+            existing_embedding = model.encode(existing_question.question, convert_to_numpy=True)
+            similarity = np.dot(new_question_embedding, existing_embedding) / (
+                np.linalg.norm(new_question_embedding) * np.linalg.norm(existing_embedding)
+            )
+
+            if similarity >= similarity_threshold:
+                suggested_questions.append({
+                    'id': existing_question.id})
+                break
+
+        question = ForumQuestion.objects.create(asked_by=request.user, question=content)
+        serializer = ForumQuestionSerializer(question)
+
+        response_data = {
+            'question': serializer.data,
+            'suggested_similar_questions': suggested_questions
+        }
+        return Response(response_data, status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@extend_schema(
+    summary="List all forum questions",
+    description="Returns all forum questions ordered by creation date (newest first).",
+    responses={
+        200: OpenApiResponse(
+            description="List of forum questions",
+            examples=[OpenApiExample("Questions", value=[{"id": 1, "question": "Example?"}])]
+        ),
+    }
+)
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def list_questions(request):
+    """
+    Returns all forum questions ordered by creation date (newest first).
+
+    Returns:
+        200 OK: List of questions.
+    """
+
+    questions = ForumQuestion.objects.all().order_by('-created_at')
+    serializer = ForumQuestionSerializer(questions, many=True)
+    return Response(serializer.data)
+
+
+@extend_schema(
+    summary="Get random forum questions for homepage",
+    description="Returns up to 10 random forum questions for the authenticated user, seeded by user and date.",
+    responses={
+        200: OpenApiResponse(
+            description="Random questions",
+            examples=[OpenApiExample("Random questions", value={"random_questions": []})]
+        ),
+        500: OpenApiResponse(
+            description="Error",
+            examples=[OpenApiExample("Error", value={"error": "Some error message"})]
+        ),
+    }
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def homepage(request):
+    """
+    Returns up to 10 random forum questions for the authenticated user.
+    The selection is seeded by user and date for consistency within a day.
+
+    Returns:
+        200 OK: List of random questions.
+        500 Internal Server Error: On error.
+    """
+
+    try:
+        user = request.user
+        all_question_ids = list(ForumQuestion.objects.values_list('pk', flat=True))
+        today = datetime.now().strftime("%Y-%m-%d")  # Format: "YYYY-MM-DD"
+        seed(f"{user.id}-{today}")
+        random_question_ids = sample(all_question_ids, min(10, len(all_question_ids)))
+        random_questions = ForumQuestion.objects.filter(pk__in=random_question_ids)
+        serializer = ForumQuestionSerializer(random_questions, many=True)
+
+        return Response({'random_questions': serializer.data})
+
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+
+
+@extend_schema(
+    summary="Create an answer for a forum question",
+    description="Creates an answer for a forum question. If a similar answer exists, it is threaded.",
+    request={
+        "application/json": {
+            "example": {
+                "content": "This is my answer to the question."
+            }
+        }
+    },
+    parameters=[
+        OpenApiParameter(name="id", description="ForumQuestion ID", required=True, type=int),
+    ],
+    responses={
+        201: OpenApiResponse(
+            description="Answer created",
+            examples=[OpenApiExample("Success", value={
+                "new_answer": {"id": 1, "content": "This is my answer to the question."},
+                "conversation_thread": []
+            })]
+        ),
+        400: OpenApiResponse(
+            description="Error",
+            examples=[OpenApiExample("Error", value={"error": "Content is required"})]
+        ),
+        404: OpenApiResponse(
+            description="Question not found",
+            examples=[OpenApiExample("Error", value={"error": "Question not found"})]
+        ),
+    }
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_answer(request):
+    """
+    Creates an answer for a forum question. If a similar answer exists, it is threaded.
+    """
+
+    global model
+    similarity_threshold = 0.7
+
+    question_id = request.query_params.get("id")
+    content = request.data.get('content')
+    if not content:
+        return Response({'error': 'Content is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        question = ForumQuestion.objects.get(id=question_id)
+        existing_answers = Answer.objects.filter(question_replied=question).order_by('-created_at')
+
+        new_answer_embedding = model.encode(content, convert_to_numpy=True)
+
+        parent_answer = None
+
+        for answer in existing_answers:
+            existing_embedding = model.encode(answer.content, convert_to_numpy=True)
+            similarity = np.dot(new_answer_embedding, existing_embedding) / (
+                np.linalg.norm(new_answer_embedding) * np.linalg.norm(existing_embedding)
+            )
+
+            if similarity >= similarity_threshold:
+                parent_answer = answer
+                break
+
+        answer = Answer.objects.create(answered_by=request.user, question_replied=question, content=content, parent_answer=parent_answer)
+
+        thread = answer.get_conversation_thread()
+        serializer = AnswerSerializer(thread, many=True)
+
+        return Response({
+            'new_answer': AnswerSerializer(answer).data,
+            'conversation_thread': serializer.data
+        }, status=status.HTTP_201_CREATED)
+
+    except ForumQuestion.DoesNotExist:
+        return Response({'error': 'Question not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+@extend_schema(
+    summary="List answers for a forum question",
+    description="Returns all answers for a given forum question, ordered by net score and creation date.",
+    parameters=[
+        OpenApiParameter(name="id", description="ForumQuestion ID", required=True, type=int),
+    ],
+    responses={
+        200: OpenApiResponse(
+            description="List of answers",
+            examples=[OpenApiExample("Answers", value=[{"id": 1, "content": "Answer text"}])]
+        ),
+        404: OpenApiResponse(
+            description="Question not found",
+            examples=[OpenApiExample("Error", value={"error": "Question not found"})]
+        ),
+    }
+)
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def list_answers(request):
+    """
+    Returns all answers for a given forum question, ordered by net score and creation date.
+
+    Query Params:
+        id: ForumQuestion ID
+
+    Returns:
+        200 OK: List of answers.
+        404 Not Found: If question does not exist.
+    """
+
+    question_id = request.query_params.get("id")
+    try:
+        question = ForumQuestion.objects.get(id=question_id)
+        answers = Answer.objects.filter(question_replied=question).annotate(
+            net_score=Count('upvote_answer') - Count('downvote_answer')
+        ).order_by('-net_score', '-created_at')
+
+        serializer = AnswerSerializer(answers, many=True)
+        return Response(serializer.data)
+    except ForumQuestion.DoesNotExist:
+        return Response({'error': 'Question not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+@extend_schema(
+    summary="List answers in stacked/threaded format",
+    description="Returns answers for a forum question in a threaded (stacked) format.",
+    parameters=[
+        OpenApiParameter(name="id", description="ForumQuestion ID", required=True, type=int),
+    ],
+    responses={
+        200: OpenApiResponse(
+            description="Stacked answers",
+            examples=[OpenApiExample("Stacked", value=[{"stack": [{"id": 1, "content": "Answer"}]}])]
+        ),
+        404: OpenApiResponse(
+            description="Question not found",
+            examples=[OpenApiExample("Error", value={"error": "Question not found"})]
+        ),
+    }
+)
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def list_answers_stacked(request):
+    """
+    Returns answers for a forum question in a threaded (stacked) format.
+
+    Query Params:
+        id: ForumQuestion ID
+
+    Returns:
+        200 OK: List of answer threads.
+        404 Not Found: If question does not exist.
+    """
+
+    question_id = request.query_params.get("id")
+    try:
+        question = ForumQuestion.objects.get(id=question_id)
+        answers = Answer.objects.filter(question_replied=question, parent_answer__isnull=True).order_by('-created_at')
+
+        conversation_threads = []
+        for answer in answers:
+            thread = answer.get_conversation_thread()
+            conversation_threads.append({
+                'stack': AnswerSerializer(thread, many=True).data
+            })
+
+        return Response(conversation_threads)
+
+    except ForumQuestion.DoesNotExist:
+        return Response({'error': 'Question not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+@extend_schema(
+    summary="Create a reply to an answer",
+    description="Creates a reply to a specific answer.",
+    request={
+        "application/json": {
+            "example": {
+                "content": "This is a reply to the answer."
+            }
+        }
+    },
+    parameters=[
+        OpenApiParameter(name="id", description="Answer ID", required=True, type=int),
+    ],
+    responses={
+        201: OpenApiResponse(
+            description="Reply created",
+            examples=[OpenApiExample("Success", value={"id": 1, "content": "This is a reply to the answer."})]
+        ),
+        400: OpenApiResponse(
+            description="Error",
+            examples=[OpenApiExample("Error", value={"error": "Content is required"})]
+        ),
+        404: OpenApiResponse(
+            description="Answer not found",
+            examples=[OpenApiExample("Error", value={"error": "Answer not found"})]
+        ),
+    }
+)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_reply(request):
+    """
+    Creates a reply to a specific answer.
+    """
+
+    answer_id = request.query_params.get("id")
+    content = request.data.get('content')
+    if not content:
+        return Response({'error': 'Content is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        answer = Answer.objects.get(id=answer_id)
+        reply = Reply.objects.create(replied_by=request.user, answer=answer, content=content)
+        serializer = ReplySerializer(reply)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    except Answer.DoesNotExist:
+        return Response({'error': 'Answer not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+@extend_schema(
+    summary="List replies for an answer",
+    description="Returns all replies for a given answer, ordered by creation date.",
+    parameters=[
+        OpenApiParameter(name="id", description="Answer ID", required=True, type=int),
+    ],
+    responses={
+        200: OpenApiResponse(
+            description="List of replies",
+            examples=[OpenApiExample("Replies", value=[{"id": 1, "content": "Reply text"}])]
+        ),
+        404: OpenApiResponse(
+            description="Answer not found",
+            examples=[OpenApiExample("Error", value={"error": "Answer not found"})]
+        ),
+    }
+)
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def list_replies(request):
+    """
+    Returns all replies for a given answer, ordered by creation date.
+
+    Query Params:
+        id: Answer ID
+
+    Returns:
+        200 OK: List of replies.
+        404 Not Found: If answer does not exist.
+    """
+
+    answer_id = request.query_params.get('id')
+    try:
+        answer = Answer.objects.get(id=answer_id)
+        replies = Reply.objects.filter(answer=answer).order_by('-created_at')
+        serializer = ReplySerializer(replies, many=True)
+        return Response(serializer.data)
+    except Answer.DoesNotExist:
+        return Response({'error': 'Answer not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+@extend_schema(
+    summary="Vote on a forum question",
+    description="Upvote or downvote a forum question.",
+    request={
+        "application/json": {
+            "example": {
+                "action": "upvote"
+            }
+        }
+    },
+    parameters=[
+        OpenApiParameter(name="id", description="ForumQuestion ID", required=True, type=int),
+    ],
+    responses={
+        200: OpenApiResponse(
+            description="Vote successful",
+            examples=[OpenApiExample("Success", value={
+                "message": "Question upvoted successfully!",
+                "total_upvotes": 5,
+                "total_downvotes": 2
+            })]
+        ),
+        400: OpenApiResponse(
+            description="Invalid action",
+            examples=[OpenApiExample("Error", value={"error": "Invalid action"})]
+        ),
+    }
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def vote_forumquestion(request):
+    """
+    Upvote or downvote a forum question.
+    """
+
+    question_id = request.query_params.get('id')
+    question = get_object_or_404(ForumQuestion, id=question_id)
+    action = request.data.get('action')
+
+    if action not in ['upvote', 'downvote']:
+        return Response({'error': 'Invalid action'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if action == 'upvote':
+        if request.user in question.downvote_question.all():
+            question.downvote_question.remove(request.user)
+        question.upvote_question.add(request.user) if request.user not in question.upvote_question.all() else question.upvote_question.remove(request.user)
+    else:
+        if request.user in question.upvote_question.all():
+            question.upvote_question.remove(request.user)
+        question.downvote_question.add(request.user) if request.user not in question.downvote_question.all() else question.downvote_question.remove(request.user)
+
+    return Response({'message': f'Question {action}d successfully!', 'total_upvotes': question.upvote_question.count(), 'total_downvotes': question.downvote_question.count()}, status=status.HTTP_200_OK)
+
+
+@extend_schema(
+    summary="Vote on an answer",
+    description="Upvote or downvote an answer.",
+    request={
+        "application/json": {
+            "example": {
+                "id": 1,
+                "action": "upvote"
+            }
+        }
+    },
+    responses={
+        200: OpenApiResponse(
+            description="Vote successful",
+            examples=[OpenApiExample("Success", value={
+                "message": "Answer upvoted successfully!",
+                "total_upvotes": 3,
+                "total_downvotes": 1
+            })]
+        ),
+        400: OpenApiResponse(
+            description="Invalid action",
+            examples=[OpenApiExample("Error", value={"error": "Invalid action"})]
+        ),
+    }
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def vote_answer(request):
+    """
+    Upvote or downvote an answer.
+    """
+
+    answer_id = request.data.get('id')
+    answer = get_object_or_404(Answer, id=answer_id)
+    action = request.data.get('action')
+    if action not in ['upvote', 'downvote']:
+        return Response({'error': 'Invalid action'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if action == 'upvote':
+        if request.user in answer.downvote_answer.all():
+            answer.downvote_answer.remove(request.user)
+        answer.upvote_answer.add(request.user) if request.user not in answer.upvote_answer.all() else answer.upvote_answer.remove(request.user)
+    else:
+        if request.user in answer.upvote_answer.all():
+            answer.upvote_answer.remove(request.user)
+        answer.downvote_answer.add(request.user) if request.user not in answer.downvote_answer.all() else answer.downvote_answer.remove(request.user)
+
+    return Response({'message': f'Answer {action}d successfully!', 'total_upvotes': answer.upvote_answer.count(), 'total_downvotes': answer.downvote_answer.count()}, status=status.HTTP_200_OK)
+
+
+@extend_schema(
+    summary="Like or dislike a reply",
+    description="Like or dislike a reply to an answer.",
+    request={
+        "application/json": {
+            "example": {
+                "action": "like"
+            }
+        }
+    },
+    parameters=[
+        OpenApiParameter(name="id", description="Reply ID", required=True, type=int),
+    ],
+    responses={
+        200: OpenApiResponse(
+            description="Action successful",
+            examples=[OpenApiExample("Success", value={
+                "message": "Review liked successfully!",
+                "reply_id": 1,
+                "total_likes": 2,
+                "total_dislikes": 0
+            })]
+        ),
+        400: OpenApiResponse(
+            description="Invalid action",
+            examples=[OpenApiExample("Error", value={"error": "Invalid action. Use \"like\" or \"dislike\"."})]
+        ),
+        404: OpenApiResponse(
+            description="Reply not found",
+            examples=[OpenApiExample("Error", value={"error": "Review not found"})]
+        ),
+    }
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def like_dislike_reply(request):
+    """
+    Like or dislike a reply to an answer.
+    """
+
+    reply_id = request.query_params.get('id')
+    reply = get_object_or_404(Reply, id=reply_id)
+    action = request.data.get('action')
+    if not reply_id or not action:
+        return Response({'error': 'Reply ID and action are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if action not in ['like', 'dislike']:
+        return Response({'error': 'Invalid action. Use "like" or "dislike".'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        if action == 'like':
+            if request.user in reply.dislikes.all():
+                reply.dislikes.remove(request.user)
+            reply.likes.add(request.user)
+        elif action == 'dislike':
+            if request.user in reply.likes.all():
+                reply.likes.remove(request.user)
+            reply.dislikes.add(request.user)
+
+        return Response({
+            'message': f'Review {action}d successfully!',
+            'reply_id': reply.id,
+            'total_likes': reply.likes.count(),
+            'total_dislikes': reply.dislikes.count()
+        }, status=status.HTTP_200_OK)
+
+    except Reply.DoesNotExist:
+        return Response({'error': 'Review not found'}, status=status.HTTP_404_NOT_FOUND)
+   
+
+@extend_schema(
+    summary="Set or get notification for a forum question",
+    description="Set notification for a forum question (POST) or get notification status (GET).",
+    request={
+        "application/json": {
+            "example": {
+                "notification": "yes"
+            }
+        }
+    },
+    parameters=[
+        OpenApiParameter(name="id", description="ForumQuestion ID", required=True, type=int),
+    ],
+    responses={
+        200: OpenApiResponse(
+            description="Notification set or retrieved",
+            examples=[
+                OpenApiExample("Set", value={"message": "Notification set for question 1"}),
+                OpenApiExample("Get", value=[{"id": 1, "notify": True}])
+            ]
+        ),
+        404: OpenApiResponse(
+            description="Question not found",
+            examples=[OpenApiExample("Error", value={"error": "Question does not exist"})]
+        ),
+    }
+)
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def question_notification(request):
+    """
+    Set notification for a forum question (POST) or get notification status (GET).
+    """
+
+    question_id = request.query_params.get("id")
+    noti = request.data.get('notification')
+
+    try:
+        question = ForumQuestion.objects.get(id=question_id)
+
+        if request.method == "POST":
+            if noti.lower() == 'yes':
+                notify, created = Notification.objects.get_or_create(user=request.user, defaults={'notify': True}, question=question)
+            return Response({
+                "message": f"Notification {'updated' if not created else 'set'} for question {question.id}"
+            }, status=status.HTTP_200_OK)
+
+        elif request.method == "GET":
+            notifications = Notification.objects.filter(question=question, user=request.user)
+
+            serializer = NotificationSerializer(notifications, many=True)
+
+            return Response(serializer.data, status=status.HTTP_200_OK)
+    except ForumQuestion.DoesNotExist:
+        return Response({'error': 'Question does not exist'}, status=status.HTTP_404_NOT_FOUND)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def notify_user(request):
+    """
+    Returns notifications for the authenticated user about questions they are following
+    that have received new answers since notification was set.
+
+    Returns:
+        200 OK: List of notifications.
+    """
+    data = []
+    for notification in Notification.objects.filter(user=request.user, notify=True):
+        question = ForumQuestion.objects.get(id=notification.question.id)
+        answer = Answer.objects.filter(question=question)
+        if answer.created_at >= notification.created_at:
+            data.append({question: 'A question you are interested in has been answered'})
+
+    return Response(data, status=status.HTTP_200_OK)
+
+
 # Everything below is default Microsoft Visual Studio 2022 code snippet for Django and was not tampered with
 def home(request):
     """Renders the home page."""
     assert isinstance(request, HttpRequest)
     return render(
         request,
-        'app/index.html',
+        'app/layout.html',
         {
             'title':'Home Page',
             'year':datetime.now().year,
