@@ -557,9 +557,6 @@ def get_apikey(request):
     return render(request, 'app/api_key_request.html', context)
 
 
-model = SentenceTransformer("all-MiniLM-L6-v2")
-
-
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_question(request):
@@ -570,7 +567,7 @@ def create_question(request):
         return Response({'error': 'Content is required'}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        global model
+        model = SentenceTransformer("all-MiniLM-L6-v2")
         new_question_embedding = model.encode(content, convert_to_numpy=True)
 
         existing_questions = ForumQuestion.objects.all()
@@ -704,7 +701,7 @@ def create_answer(request):
     Creates an answer for a forum question. If a similar answer exists, it is threaded.
     """
 
-    global model
+    model = SentenceTransformer("all-MiniLM-L6-v2")
     similarity_threshold = 0.7
 
     question_id = request.query_params.get("id")
