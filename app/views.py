@@ -4,6 +4,7 @@ Definition of views.
 
 from math import perm
 from random import sample, seed
+import tracemalloc
 
 from django.views.decorators.csrf import csrf_exempt
 import requests
@@ -557,19 +558,26 @@ def get_apikey(request):
     return render(request, 'app/api_key_request.html', context)
 
 
+tracemalloc.start()
+model = SentenceTransformer('paraphrase-MiniLM-L3-v2')  # Load the model globally for reuse
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_question(request):
     content = request.data.get('content')
     similarity_threshold = 0.7
 
+    global model
+
     if not content:
         return Response({'error': 'Content is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
 
     try:
-        model = SentenceTransformer("all-MiniLM-L6-v2")
+        snapshot_before = tracemalloc.take_snapshot()
         new_question_embedding = model.encode(content, convert_to_numpy=True)
-
+        snapshot_after = tracemalloc.take_snapshot()
         existing_questions = ForumQuestion.objects.all()
 
         suggested_questions = []
@@ -591,6 +599,13 @@ def create_question(request):
             'question': serializer.data,
             'suggested_similar_questions': suggested_questions
         }
+        top_stats = snapshot_after.compare_to(snapshot_before, 'lineno')
+
+        print("[ Top 10 differences ]")
+        for stat in top_stats[:10]:
+            print(stat)
+
+        tracemalloc.stop()
         return Response(response_data, status=status.HTTP_201_CREATED)
 
     except Exception as e:
@@ -701,7 +716,7 @@ def create_answer(request):
     Creates an answer for a forum question. If a similar answer exists, it is threaded.
     """
 
-    model = SentenceTransformer("all-MiniLM-L6-v2")
+    global model
     similarity_threshold = 0.7
 
     question_id = request.query_params.get("id")
