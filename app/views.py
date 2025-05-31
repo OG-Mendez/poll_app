@@ -4,7 +4,6 @@ Definition of views.
 
 from math import perm
 from random import sample, seed
-import tracemalloc
 
 from django.views.decorators.csrf import csrf_exempt
 import requests
@@ -558,7 +557,6 @@ def get_apikey(request):
     return render(request, 'app/api_key_request.html', context)
 
 
-tracemalloc.start()
 model = SentenceTransformer('paraphrase-MiniLM-L3-v2')  # Load the model globally for reuse
 
 
@@ -575,9 +573,7 @@ def create_question(request):
     
 
     try:
-        snapshot_before = tracemalloc.take_snapshot()
         new_question_embedding = model.encode(content, convert_to_numpy=True)
-        snapshot_after = tracemalloc.take_snapshot()
         existing_questions = ForumQuestion.objects.all()
 
         suggested_questions = []
@@ -599,13 +595,6 @@ def create_question(request):
             'question': serializer.data,
             'suggested_similar_questions': suggested_questions
         }
-        top_stats = snapshot_after.compare_to(snapshot_before, 'lineno')
-
-        print("[ Top 10 differences ]")
-        for stat in top_stats[:10]:
-            print(stat)
-
-        tracemalloc.stop()
         return Response(response_data, status=status.HTTP_201_CREATED)
 
     except Exception as e:
