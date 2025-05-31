@@ -557,8 +557,6 @@ def get_apikey(request):
     return render(request, 'app/api_key_request.html', context)
 
 
-model = SentenceTransformer('paraphrase-MiniLM-L3-v2')  # Load the model globally for reuse
-
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -566,7 +564,7 @@ def create_question(request):
     content = request.data.get('content')
     similarity_threshold = 0.7
 
-    global model
+    model = SentenceTransformer('paraphrase-albert-small-v2') 
 
     if not content:
         return Response({'error': 'Content is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -705,7 +703,7 @@ def create_answer(request):
     Creates an answer for a forum question. If a similar answer exists, it is threaded.
     """
 
-    global model
+    model = SentenceTransformer('paraphrase-albert-small-v2') 
     similarity_threshold = 0.7
 
     question_id = request.query_params.get("id")
