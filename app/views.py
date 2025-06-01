@@ -4,6 +4,7 @@ Definition of views.
 
 from math import perm
 from random import sample, seed
+from re import A
 
 from django.views.decorators.csrf import csrf_exempt
 import requests
@@ -22,6 +23,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.views import csrf_exempt
 from .serializers import QuestionSerializer, AnswerSerializer, ForumQuestionSerializer, NotificationSerializer, ReplySerializer
 from .models import ForumQuestion, Question, Choice, Answer, Reply, Notification, Apikey
+from .decorators import api_key
 from django.contrib.auth.models import User
 import csv
 import numpy as np
@@ -71,6 +73,7 @@ def login_view(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@api_key
 def signup_view_api(request):
     username = request.data.get('username')
     password = request.data.get('password')
@@ -90,6 +93,7 @@ def signup_view_api(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@api_key
 def login_view_api(request):
     username = request.data.get('username')
     password = request.data.get('password')
@@ -106,6 +110,7 @@ def login_view_api(request):
      
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@api_key
 def logout_view_api(request):
     try:
         token = Token.objects.get(user=request.user)
@@ -157,6 +162,7 @@ def logout_view_api(request):
 )
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@api_key
 def create_poll(request):
     tag = request.data.get('tag')
     question = request.data.get('question')
@@ -223,6 +229,7 @@ def create_poll(request):
 )
 @api_view(['GET'])
 @permission_classes([AllowAny])
+@api_key
 def get_questions(request):
     tag = request.query_params.get('tag')
     code = request.query_params.get('code')
@@ -296,6 +303,7 @@ def get_questions(request):
 )
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@api_key
 def vote(request):
     tag = request.query_params.get('tag')
     code = request.query_params.get('code')
@@ -362,6 +370,7 @@ def vote(request):
 )
 @api_view(['GET'])
 @permission_classes([AllowAny])
+@api_key
 def results(request):
     tag = request.query_params.get('tag')
     code = request.query_params.get('code')
@@ -480,6 +489,7 @@ def scraper(request):
 @csrf_exempt
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@api_key
 def scraper_api(request):
     url = request.data.get("url")
     tags_str = request.data.get("tags")
@@ -557,14 +567,14 @@ def get_apikey(request):
     return render(request, 'app/api_key_request.html', context)
 
 
-
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@api_key
 def create_question(request):
     content = request.data.get('content')
     similarity_threshold = 0.7
 
-    model = SentenceTransformer('paraphrase-albert-small-v2') 
+    model = SentenceTransformer('all-MiniLM-L6-v2') 
 
     if not content:
         return Response({'error': 'Content is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -599,6 +609,7 @@ def create_question(request):
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+
 @extend_schema(
     summary="List all forum questions",
     description="Returns all forum questions ordered by creation date (newest first).",
@@ -611,6 +622,7 @@ def create_question(request):
 )
 @api_view(['GET'])
 @permission_classes([AllowAny])
+@api_key
 def list_questions(request):
     """
     Returns all forum questions ordered by creation date (newest first).
@@ -640,6 +652,7 @@ def list_questions(request):
 )
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+@api_key
 def homepage(request):
     """
     Returns up to 10 random forum questions for the authenticated user.
@@ -698,6 +711,7 @@ def homepage(request):
 )
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@api_key
 def create_answer(request):
     """
     Creates an answer for a forum question. If a similar answer exists, it is threaded.
@@ -762,6 +776,7 @@ def create_answer(request):
 )
 @api_view(['GET'])
 @permission_classes([AllowAny])
+@api_key
 def list_answers(request):
     """
     Returns all answers for a given forum question, ordered by net score and creation date.
@@ -806,6 +821,7 @@ def list_answers(request):
 )
 @api_view(['GET'])
 @permission_classes([AllowAny])
+@api_key
 def list_answers_stacked(request):
     """
     Returns answers for a forum question in a threaded (stacked) format.
@@ -867,6 +883,7 @@ def list_answers_stacked(request):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@api_key
 def create_reply(request):
     """
     Creates a reply to a specific answer.
@@ -905,6 +922,7 @@ def create_reply(request):
 )
 @api_view(['GET'])
 @permission_classes([AllowAny])
+@api_key
 def list_replies(request):
     """
     Returns all replies for a given answer, ordered by creation date.
@@ -957,6 +975,7 @@ def list_replies(request):
 )
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@api_key
 def vote_forumquestion(request):
     """
     Upvote or downvote a forum question.
@@ -1009,6 +1028,7 @@ def vote_forumquestion(request):
 )
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@api_key
 def vote_answer(request):
     """
     Upvote or downvote an answer.
@@ -1067,6 +1087,7 @@ def vote_answer(request):
 )
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@api_key
 def like_dislike_reply(request):
     """
     Like or dislike a reply to an answer.
@@ -1131,6 +1152,7 @@ def like_dislike_reply(request):
 )
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
+@api_key
 def question_notification(request):
     """
     Set notification for a forum question (POST) or get notification status (GET).
@@ -1161,6 +1183,7 @@ def question_notification(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+@api_key
 def notify_user(request):
     """
     Returns notifications for the authenticated user about questions they are following
