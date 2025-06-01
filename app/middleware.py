@@ -10,6 +10,6 @@ class APIKeyMiddleware:
         api_key = request.headers.get('X-API-KEY')
 
         if not api_key or api_key not in settings.FRONTEND_API_KEYS:
-            return JsonResponse({'error': 'Unauthorized'}, status=401)
+            return JsonResponse({'error': 'Unauthorized, connect to X-API-KEY.'}, status=401)
 
         return self.get_response(request)
